@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Ignore all data and generated outputs
+/data/
+
+# Temporary files
+*.tmp
+*.log
