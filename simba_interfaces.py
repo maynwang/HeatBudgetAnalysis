@@ -129,6 +129,7 @@ def load_simba_data(
 
     data_dir = (
         root_dir
+        / "data"
         / str(cfg.year)
         / "SIMBA"
         
@@ -198,6 +199,7 @@ def load_simba_data(
 # ============================================================
 # TEMPERATURE CALIBRATION CORRECTION
 # ============================================================
+
 
 def correct_temperature(
     da_temp,
@@ -512,7 +514,12 @@ def detect_snow_air(
     cfg,
     drop_times=None,
     replacement_times=None,
-):
+    ):
+    '''
+    Calculate the air temperature mean using the top of the thermistor chain, then find where the temperature deviates from the mean (snow-air interface)
+
+    Use for 2024
+    '''
 
     # Original nighttime hours
     hours = [
@@ -615,6 +622,55 @@ def detect_snow_air(
 
     return snow_air
 
+def detect_snow_air_from_heating(
+    da_del1,
+    da_del4,
+    cfg,
+    threshold=0.05,
+    window=5,
+    node_min=0,
+    node_max=100,
+):
+    """
+    Detect the snow-air interface from the first sustained region
+    of strong HT30/HT120 gradients, searching top-down.
+
+    Returns the detected node number.
+    """
+
+    # Calculate heating ratio
+    T_30_120 = da_del1 / da_del4
+
+    # Restrict to the upper part of the chain
+    T_30_120 = T_30_120.isel(
+        node=slice(node_min, node_max)
+    )
+
+    # Calculate gradient along the chain
+    gradient = T_30_120.diff("node")
+
+    # Rolling mean of absolute gradient
+    gradient_smooth = (
+        abs(gradient)
+        .rolling(
+            node=window,
+            center=True,
+            min_periods=window,
+        )
+        .mean()
+    )
+
+    # Identify regions exceeding the threshold
+    steep = gradient_smooth > threshold
+
+    # Find the FIRST qualifying node from the top downward
+    snow_air_node = (
+        gradient_smooth.node
+        .where(steep)
+        .min("node", skipna=True)
+    )
+
+    return snow_air_node
 
 from pathlib import Path
 import xarray as xr
@@ -702,16 +758,63 @@ def build_interface_dataset(
 
     return ds
 
+def correct_interface_outliers(interface, threshold=0.06):
+    """
+    Correct isolated spikes in a SIMBA interface time series.
+
+    If a point differs from the previous point by more than
+    threshold, but the following point returns close to the
+    previous value, replace the spike with the average of
+    its two neighbours.
+
+    Parameters
+    ----------
+    interface : xr.DataArray
+        Interface elevation (m), with a time dimension.
+    threshold : float
+        Maximum permitted jump (m). Default is 0.06 m.
+
+    Returns
+    -------
+    xr.DataArray
+        Corrected interface with original coordinates preserved.
+    """
+
+    original = interface.values.copy()
+    corrected = original.copy()
+
+    for i in range(1, len(original) - 1):
+
+        previous = original[i - 1]
+        current = original[i]
+        following = original[i + 1]
+
+        # Skip missing values
+        if not np.all(np.isfinite([previous, current, following])):
+            continue
+
+        # Detect an isolated spike
+        if (
+            abs(current - previous) > threshold
+            and abs(following - previous) <= threshold
+        ):
+            corrected[i] = (previous + following) / 2
+
+    return interface.copy(data=corrected)
+
+
 def smooth_ice_water_clamped(
     ice_water_m,
     temp_time,
-    clamp_value=-0.62,
+    clamp_value,
     taper_len=20,
     spline_s=0.004,
+    apply_2024_patch=False,
 ):
     """
-    Reproduce the original 2024 clamped-spline smoothing
-    of the ice-water interface.
+    Smooth the ice-water interface using a clamped spline.
+
+    The localized 2024 correction can be disabled for other years.
     """
 
     from scipy.interpolate import splrep, splev
@@ -727,12 +830,10 @@ def smooth_ice_water_clamped(
     if len(flat_indices) == 0:
         raise ValueError(
             f"No ice-water values equal {clamp_value} m. "
-            "Check ice_water_m before smoothing."
+            "Check whether clamping is appropriate for this year."
         )
 
     flat_start_idx = flat_indices[0]
-
-    # Include 20 points after the first flat value in the fit
     fit_end_idx = flat_start_idx + taper_len
 
     if fit_end_idx > len(y_all):
@@ -758,9 +859,7 @@ def smooth_ice_water_clamped(
 
     # Cosine taper
     taper_weights = 0.5 * (
-        1 + np.cos(
-            np.linspace(0, np.pi, taper_len)
-        )
+        1 + np.cos(np.linspace(0, np.pi, taper_len))
     )
 
     y_blended = y_spline.copy()
@@ -784,28 +883,45 @@ def smooth_ice_water_clamped(
         name="H_bottom",
     )
 
-    # Hard clamp at -0.62 m
+    # Hard clamp
     clamped_ = clamped.where(
         clamped >= clamp_value,
         clamp_value,
     )
 
-    # Original localized rolling mean
-    clamped_roll = (
-        clamped_[40:70]
-        .rolling(time=5, center=True)
-        .mean()
-    )
+    # Apply the original localized correction only for 2024
+    if apply_2024_patch:
 
-    clamped_[45:65] = clamped_roll[5:-5]
+        if clamped_.sizes["time"] < 70:
+            raise ValueError(
+                "The 2024 correction requires at least 70 time points."
+            )
 
-    # Interpolate to the temperature time grid
+        clamped_roll = (
+            clamped_.isel(time=slice(40, 70))
+            .rolling(time=5, center=True)
+            .mean()
+        )
+
+        # Assign by position rather than mismatched time coordinates
+        corrected = clamped_.values.copy()
+
+        corrected[45:65] = (
+            clamped_roll
+            .isel(time=slice(5, -5))
+            .values
+        )
+
+        clamped_ = clamped_.copy(data=corrected)
+
+    # Interpolate to temperature timestamps
     clamped_interp = clamped_.interp(
         time=temp_time,
         method="linear",
     )
 
     return clamped_interp
+
 
 def save_interface_dataset(
     ds,

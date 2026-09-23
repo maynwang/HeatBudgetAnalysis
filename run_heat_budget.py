@@ -12,15 +12,26 @@ from heat_budget import (
 )
 
 
+# season = SeasonConfig(
+#     year=2024,
+#     start="2024-01-26",
+#     end="2024-04-15",
+#     base_dir=Path("."),
+#     rain_file=Path(
+#         "data/2024/PostvilleWeather/postville_weather_2020-2024.csv"
+#     ),
+#     basal_plot_start="2024-02-02",
+# )
+
 season = SeasonConfig(
-    year=2024,
-    start="2024-01-26",
-    end="2024-04-15",
+    year=2025,
+    start="2025-02-19",
+    end="2025-04-22",
     base_dir=Path("."),
     rain_file=Path(
-        "2024/PostvilleWeather/postville_weather_2020-2024.csv"
+        "data/2024/PostvilleWeather/postville_weather_2019-2026.csv"
     ),
-    basal_plot_start="2024-02-02",
+    basal_plot_start=None,
 )
 
 params = HeatBudgetParameters()
@@ -57,15 +68,15 @@ if "rain_mm" in daily:
         print(f"{key}: {value}")
 
 
-output_dir = Path("heat_budget_refactor_v2/processed")
+output_dir = Path("outputs")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 daily.to_netcdf(
-    f"processed/HeatBudget_inputs_{season.year}.nc"
+    f"outputs/HeatBudget_inputs_{season.year}.nc"
 )
 
 fluxes.to_netcdf(
-    f"processed/HeatBudget_fluxes_{season.year}.nc"
+    f"outputs/HeatBudget_fluxes_{season.year}.nc"
 )
 
 print(f"\nSaved outputs to {output_dir}")

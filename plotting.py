@@ -3,23 +3,44 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
+plt.ion()
 import matplotlib.dates as mdates
 
 from heat_budget.config import HeatBudgetParameters
 
+# ============================================================
+# GENERAL PLOT SETTINGS
+# ============================================================
+
+# # 2024
+# t1 = np.datetime64("2024-01-26")
+# t2 = np.datetime64("2025-04-15")
+
+# 2025
+t1 = np.datetime64("2025-02-19")
+t2 = np.datetime64("2025-04-10")
+
+# Date to start the basal heat fluxes
+# basal_start = "2024-02-02" 
+basal_start = None
+
+
+fontsize = 12
+
+savefig = 'yes'
 
 # ============================================================
 # LOAD NEW HEAT-BUDGET OUTPUT
 # ============================================================
 
-processed_dir = Path("processed/")
+processed_dir = Path("outputs/")
 
 daily = xr.open_dataset(
-    processed_dir / "HeatBudget_inputs_2024.nc"
+    processed_dir / "HeatBudget_inputs_2025.nc"
 )
 
 fluxes = xr.open_dataset(
-    processed_dir / "HeatBudget_fluxes_2024.nc"
+    processed_dir / "HeatBudget_fluxes_2025.nc"
 )
 
 params = HeatBudgetParameters()
@@ -107,9 +128,9 @@ F_snowmelt = fluxes["F_snow_melt"]
 
 F_icemelt = fluxes["F_ice_melt"]
 
-DIFF = fluxes["residual"]
+residual = fluxes["residual"]
 
-DIFF_roll = fluxes["residual_roll"]
+residual_roll = fluxes["residual_roll"]
 
 sig_F_surf_roll = fluxes["sig_F_surface_roll"]
 
@@ -120,17 +141,6 @@ rain_non0 = daily["rain_mm"].where(
     daily["rain_mm"] > 0,
     drop=True,
 )
-
-
-# ============================================================
-# ORIGINAL GENERAL PLOT SETTINGS
-# ============================================================
-
-t1 = np.datetime64("2024-01-26")
-t2 = np.datetime64("2024-04-15")
-
-fontsize = 12
-
 
 
 # ============================================================
@@ -229,7 +239,7 @@ axx[an].plot(
 axx[an].grid()
 
 axx[an].set_ylim(
-    [-130,100]
+    [-100,100]
 )
 
 axx[an].set_ylabel(
@@ -343,7 +353,7 @@ axx[an].set_ylabel(
 )
 
 axx[an].set_ylim(
-    [-0.75,1]
+    [-1,1]
 )
 
 
@@ -388,15 +398,15 @@ axx[an].text(
 
 
 F_l_daily_sub = F_l_daily.sel(
-    time=slice("2024-02-02",None)
+    time=slice(basal_start,None)
 )
 
 F_c_daily_sub = F_c.sel(
-    time=slice("2024-02-02",None)
+    time=slice(basal_start,None)
 )
 
 F_w_daily_sub = F_w_daily.sel(
-    time=slice("2024-02-02",None)
+    time=slice(basal_start,None)
 )
 
 
@@ -433,10 +443,10 @@ axx[an].plot(
 #
 # It does NOT change the appearance of the plot.
 
-axx[an].axvline(
-    np.datetime64("2024-02-02"),
-    c="grey",
-)
+# axx[an].axvline(
+#     np.datetime64(basal_start),
+#     c="grey",
+# )
 
 
 axx[an].set_ylabel(
@@ -495,13 +505,12 @@ axx[an].tick_params(
 plt.show()
 
 
-# Optional save:
-#
-# fig.savefig(
-#     "Fig6_HeatFluxes.png",
-#     dpi=300,
-#     bbox_inches="tight",
-# )
+if savefig=='yes':
+    fig.savefig(
+        "figures/HeatFluxes_2025.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
 
 
 
@@ -724,7 +733,7 @@ axx[an].bar(
 
 axx[an].plot(
     t,
-    DIFF_roll,
+    residual_roll,
     "k--",
     label="Residual \n (smoothed)",
 )
@@ -788,7 +797,7 @@ axx[an].plot(
 
 axx[an].plot(
     t,
-    DIFF,
+    residual,
     c="darkgrey",
     linestyle="--",
     label="Residual \n (unsmoothed)",
@@ -797,7 +806,7 @@ axx[an].plot(
 
 axx[an].plot(
     t,
-    DIFF_roll,
+    residual_roll,
     "k--",
     label="Residual \n (smoothed)",
 )
@@ -845,7 +854,7 @@ axx[an].text(
 
 axx[an].plot(
     t,
-    DIFF_roll,
+    residual_roll,
     "k--",
     label="Residual \n (smoothed)",
 )
@@ -915,13 +924,12 @@ l3 = axx[an].legend(
 )
 
 
-plt.show()
 
 
 # Optional save:
-#
-# fig.savefig(
-#     "Fig7_Residual_new.png",
-#     dpi=300,
-#     bbox_inches="tight",
-# )
+if savefig=="yes":
+    fig.savefig(
+        "figures/Residual_2025.png",
+        dpi=300,
+        bbox_inches="tight",
+    )

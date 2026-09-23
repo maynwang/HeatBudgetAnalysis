@@ -20,57 +20,61 @@ def calculate_residual(
     residual analysis while returning daily output.
     """
 
-    if "snow_ice_smoothed" not in raw:
-        raise KeyError(
-            "Residual calculation requires "
-            "SIMBA/snow-ice-smoothed.pickle."
-        )
-
     # ========================================================
     # 1. SNOW MELT
     # ========================================================
 
-    # Change in snow-air interface
-    dH_snow_loss = daily["snow_air"].diff("time").where(
-        daily["H_snow"].diff("time") < 0,
+    # --------------------------------------------------------
+    # Snow-air interface change
+    # --------------------------------------------------------
+
+    dH_snow_air = daily["snow_air"].diff("time")
+    dH_snow = daily["H_snow"].diff("time")
+
+    # Only retain periods when total dry-snow thickness decreases
+    dH_snow_loss = dH_snow_air.where(
+        dH_snow < 0,
         0,
     )
 
-    # Fraction of snow loss attributed to melt.
-    # Original assumption:
-    # if wind >= 7.7 m/s, only 12% of snow loss is melt.
+    # --------------------------------------------------------
+    # Align other variables explicitly with the snow-loss interval
+    # --------------------------------------------------------
+
+    # diff() labels each interval with the later timestamp.
+    # For example:
+    # Feb 28 = snow_air(Feb 28) - snow_air(Feb 27)
+
+    interval_time = dH_snow_loss.time
+
+    # Surface heat flux corresponding to the preceding day
+    F_net_previous = xr.DataArray(
+        fluxes["F_net_surface"].isel(time=slice(None, -1)).values,
+        coords={"time": interval_time},
+        dims=["time"],
+    )
+
+    # Only count snow loss as melt when surface energy is toward melt
+    dH_snow_melt = dH_snow_loss.where(
+        F_net_previous < 0,
+        0,
+    )
+
+    # --------------------------------------------------------
+    # Wind redistribution
+    # --------------------------------------------------------
+
+    wind_for_interval = daily["wind_10m_max"].sel(
+        time=interval_time
+    )
+
     melt_fraction = xr.where(
-        daily["wind_10m_max"]
-        >= p.wind_transport_threshold,
+        wind_for_interval >= p.wind_transport_threshold,
         p.snow_melt_fraction_during_transport,
         1.0,
     )
 
-    # --------------------------------------------------------
-    # Reproduce original time alignment
-    # --------------------------------------------------------
-    #
-    # Original code used:
-    #
-    # dH_snow_loss.where(
-    #     F_net_surf[0:-1].values < 0, 0
-    # )
-    #
-    # So the heat-flux criterion is applied positionally using
-    # the preceding F_net_surface timestamp.
-    #
-
-    dH_snow_melt = dH_snow_loss.where(
-        fluxes["F_net_surface"][:-1].values < 0,
-        0,
-    )
-
-    # xarray aligns melt_fraction to the timestamps of
-    # dH_snow_melt here, matching the original calculation.
-    dH_snow_melt = (
-        dH_snow_melt
-        * melt_fraction
-    )
+    dH_snow_melt = dH_snow_melt * melt_fraction
 
     # --------------------------------------------------------
     # Convert snow loss to heat flux
@@ -136,7 +140,7 @@ def calculate_residual(
         .mean("time")
     )
 
-    # Reproduce original 2024 criterion exactly.
+    # Only melt ice if the snow depth is 0
     F_ice_melt = F_ice_melt.where(
         daily["H_snow"] == 0,
         0,

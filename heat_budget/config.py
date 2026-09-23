@@ -3,6 +3,11 @@ from pathlib import Path
 from typing import Optional
 
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+
 @dataclass
 class SeasonConfig:
     """Files and dates that can change from one field season to another."""
@@ -11,10 +16,12 @@ class SeasonConfig:
     start: str
     end: str
     base_dir: Path = Path(".")
-    simba_dir: Optional[Path] = None
 
-    # Optional season-specific files / dates
+    # Optional season-specific files
+    simba_file: Optional[Path] = None
     rain_file: Optional[Path] = None
+
+    # Optional season-specific dates
     basal_plot_start: Optional[str] = None
 
     # Instrument setup
@@ -25,7 +32,7 @@ class SeasonConfig:
     net_longwave_var: str = "RlNet_Avg"
     net_shortwave_var: str = "RsNet_Avg"
     wind_speed_var: str = "WS_ms_Avg"
-    relative_humidity_var: str = "Humidity"
+    relative_humidity_var: str = "RH"
     pressure_var: str = "BP_mbar_Avg"
     sw_in_var: str = "SWUpper_Avg"
     sw_out_var: str = "SWLower_Avg"
@@ -34,8 +41,10 @@ class SeasonConfig:
 
     def __post_init__(self):
         self.base_dir = Path(self.base_dir)
-        if self.simba_dir is not None:
-            self.simba_dir = Path(self.simba_dir)
+
+        if self.simba_file is not None:
+            self.simba_file = Path(self.simba_file)
+
         if self.rain_file is not None:
             self.rain_file = Path(self.rain_file)
 
@@ -43,25 +52,42 @@ class SeasonConfig:
     def weather_file(self) -> Path:
         return (
             self.base_dir
+            / "data"
             / str(self.year)
             / "WeatherStation"
             / "WeatherVars.nc"
         )
 
     @property
-    def simba_path(self) -> Path:
-        if self.simba_dir is None:
-            return self.base_dir / str(self.year) / "SIMBA"
-        if self.simba_dir.is_absolute():
-            return self.simba_dir
-        return self.base_dir / self.simba_dir
+    def simba_interfaces_file(self) -> Path:
+        """
+        Path to processed SIMBA interface NetCDF file.
+        """
+
+        # Use explicitly supplied file if given
+        if self.simba_file is not None:
+            if self.simba_file.is_absolute():
+                return self.simba_file
+            return self.base_dir / self.simba_file
+
+        # Otherwise use the standard directory structure
+        return (
+            self.base_dir
+            / "data"
+            / str(self.year)
+            / "SIMBA"
+            / "processed"
+            / f"SIMBA_interfaces_{self.year}.nc"
+        )
 
     @property
     def rain_path(self) -> Optional[Path]:
         if self.rain_file is None:
             return None
+
         if self.rain_file.is_absolute():
             return self.rain_file
+
         return self.base_dir / self.rain_file
 
 

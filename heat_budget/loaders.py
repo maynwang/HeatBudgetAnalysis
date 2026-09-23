@@ -1,4 +1,3 @@
-import pickle
 from pathlib import Path
 from typing import Dict
 
@@ -9,11 +8,16 @@ from functions import IMS_toolbox as IMS
 
 from .config import SeasonConfig, HeatBudgetParameters
 
+def _rename_time(da):
+    """Rename SIMBA time dimension to 'time'."""
 
-def _load_pickle(path: Path):
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    if "time_6h" in da.dims:
+        return da.rename({"time_6h": "time"})
 
+    if "time_daily" in da.dims:
+        return da.rename({"time_daily": "time"})
+
+    return da
 
 def _daily_mean(da, start: str, end: str):
     return (
@@ -27,29 +31,45 @@ def _daily_mean(da, start: str, end: str):
 def load_raw_data(cfg: SeasonConfig) -> Dict[str, object]:
     """Load raw files used by the heat-budget and residual calculations."""
 
-    simba = cfg.simba_path
+    # --------------------------------------------------
+    # Weather
+    # --------------------------------------------------
+    weather = xr.open_dataset(cfg.weather_file)
+
+    # --------------------------------------------------
+    # Processed SIMBA interfaces
+    # --------------------------------------------------
+    interfaces = xr.open_dataset(cfg.simba_interfaces_file)
 
     raw = {
         "weather": xr.open_dataset(cfg.weather_file),
-        "temp_ice": _load_pickle(simba / "temp_ice_z.pickle"),
-        "H_ice": _load_pickle(simba / "H_SIMBA.pickle"),
-        "H_bottom": _load_pickle(simba / "ice_water_spline_clamped.pickle"),
-        "snow_air": _load_pickle(simba / "snow-air.pickle"),
-        "snow_ice": pd.read_pickle(simba / "snow-ice.pickle"),
-        "H_snow": _load_pickle(simba / "Hsnow_SIMBA.pickle"),
-        "temperature": pd.read_pickle(simba / "da_temp_z.pickle"),
+
+        "temperature": _rename_time(interfaces["temperature"]),
+        "temp_ice": _rename_time(interfaces["temp_ice"]),
+        "H_ice": _rename_time(interfaces["H_ice"]),
+        "H_bottom": _rename_time(interfaces["H_bottom"]),
+        "snow_air": _rename_time(interfaces["snow_air"]),
+        "snow_ice": _rename_time(interfaces["snow_ice"]),
+        "snow_ice_smoothed": _rename_time(interfaces["snow_ice_smoothed"]),
+        "H_snow": _rename_time(interfaces["H_snow"]),
     }
 
-    smoothed_path = simba / "snow-ice-smoothed.pickle"
-    if smoothed_path.exists():
-        raw["snow_ice_smoothed"] = pd.read_pickle(smoothed_path)
 
+    # --------------------------------------------------
+    # Rain
+    # --------------------------------------------------
     if cfg.rain_path is not None:
-        rain_file = pd.read_csv(cfg.rain_path, low_memory=False)
-        raw["rain"] = IMS.load_Rway_station_data(rain_file, "rain")
+        rain_file = pd.read_csv(
+            cfg.rain_path,
+            low_memory=False,
+        )
+
+        raw["rain"] = IMS.load_Rway_station_data(
+            rain_file,
+            "rain",
+        )
 
     return raw
-
 
 def preprocess_daily(
     raw: Dict[str, object],
@@ -64,12 +84,20 @@ def preprocess_daily(
     RH = weather[cfg.relative_humidity_var].resample(time="1D").mean("time")
     pressure = weather[cfg.pressure_var].resample(time="1D").mean("time")
 
-    wind_10m_native = (
-        weather[cfg.wind_speed_var]
+    # first average weather data to hourly resolution (for max winds in residual)
+    weather_hourly = weather.resample(time="1h").mean("time")
+
+    # Convert hourly wind from measurement height to 10 m
+    wind_10m_hourly = (
+        weather_hourly[cfg.wind_speed_var]
         * (10.0 / cfg.wind_measurement_height) ** (1.0 / 7.0)
     )
-    wind_10m = wind_10m_native.resample(time="1D").mean("time")
-    wind_10m_max = wind_10m_native.resample(time="1D").max("time")
+
+    # Daily mean 10 m wind
+    wind_10m = wind_10m_hourly.resample(time="1D").mean("time")
+
+    # Daily maximum of the hourly-mean 10 m wind
+    wind_10m_max = wind_10m_hourly.resample(time="1D").max("time")
 
     F_lw_measured = -weather[cfg.net_longwave_var].resample(time="1D").mean("time")
 
@@ -90,6 +118,7 @@ def preprocess_daily(
     LW_in_native = weather[cfg.lw_in_var]
     LW_out_native = weather[cfg.lw_out_var]
 
+    # Calculate the surface temp using an assumed emissivity and LWR
     T_surface_native = (
         (
             (

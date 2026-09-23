@@ -55,7 +55,7 @@ simba = load_simba_data(
 
 
 weekly_ice = xr.open_dataset(
-    "2024/SiteVisits/SiteVisits_Weekly_IceSnowWater.nc"
+    "data/2024/SiteVisits/SiteVisits_Weekly_IceSnowWater.nc"
 )
 
 
@@ -232,6 +232,7 @@ H_bottom = smooth_ice_water_clamped(
     clamp_value=-0.62,
     taper_len=20,
     spline_s=0.004,
+    apply_2024_patch=True
 )
 
 ice_water_smooth = smooth_ice_water(
@@ -475,9 +476,10 @@ interfaces = build_interface_dataset(
 
 
 # output_file = (
-#     Path("SIMBA")
-#     / "processed"
+#     Path("data")
 #     / str(cfg.year)
+#     / "SIMBA"
+#     / "processed"
 #     / f"SIMBA_interfaces_{cfg.year}.nc"
 # )
 

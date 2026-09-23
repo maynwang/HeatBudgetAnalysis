@@ -10,6 +10,8 @@ venv/
 
 # Ignore all data and generated outputs
 /data/
+/outputs/
+/figures/
 
 # Temporary files
 *.tmp
