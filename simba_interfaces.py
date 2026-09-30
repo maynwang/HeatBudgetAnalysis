@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import glob
-import pickle
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -22,101 +20,51 @@ class SIMBAConfig:
     start: str
     end: str
 
-    # SIMBA geometry
-    offset_cm: float
-    node_spacing_cm: float = 2.0
-    max_node: int = 236
-
-    # Calibration correction
+    # Temperature calibration correction
     calibration_start: str = None
     calibration_end: str = None
     spline_s: float = 1.0
 
+    # Vertical search ranges are expressed in metres below the
+    # top thermistor. With 2 cm thermistor spacing, these reproduce
+    # the original node-space windows exactly:
+    #   snow-ice: 0:100 nodes -> 0.00 <= depth < 2.00 m
+    #   ice-water: 80:125 nodes -> 1.60 <= depth < 2.50 m
+
     # Snow-ice detection
-    snow_ice_node_min: int = 0
-    snow_ice_node_max: int = 100
+    snow_ice_search_min_z_m: float = 0.0
+    snow_ice_search_max_z_m: float = 1
     snow_ice_smooth_window: int = 4
 
     # Ice-water detection
-    ice_water_node_min: int = 80
-    ice_water_node_max: int = 125
-    ice_water_gradient_threshold: float = 0.1
+    ice_water_search_min_z_m: float = -1.0
+    ice_water_search_max_z_m: float = 0.0
+    ice_water_gradient_threshold_per_m: float = 5.0
     ice_water_smooth_window: int = 5
 
-    # Snow-air detection
-    snow_air_threshold: float = 0.7
-
+    # Snow-air detection from heating ratios
+    snow_air_heating_search_min_z_m: float = 0.0
+    snow_air_heating_search_max_z_m: float = 1.0
+    snow_air_heating_gradient_threshold_per_m: float = 2.5
+    snow_air_heating_smooth_depth_m: float = 0.10
 
 
 # ============================================================
 # LOAD SIMBA FILES
 # ============================================================
 
-def simba_to_da(path):
-    """
-    Load all SIMBA files matching path into one DataArray.
-    """
 
-    files = sorted(
-        glob.glob(str(path))
-    )
+def _prepare_simba_vertical_coordinate(da):
+    """Return a SIMBA DataArray ordered from the top sensor downward in z."""
 
-    if len(files) == 0:
-        raise FileNotFoundError(
-            f"No SIMBA files found for:\n{path}"
+    if "z" not in da.dims:
+        raise ValueError(
+            "SIMBA DataArray must use physical height 'z' as a dimension."
         )
 
-    dfs = []
-
-    for file in files:
-
-        df = pd.read_fwf(
-            file,
-            header=None,
-        )
-
-        dfs.append(df)
-
-
-    # replaces deprecated df.append()
-    df = pd.concat(
-        dfs,
-        ignore_index=True,
-    )
-
-
-    time = pd.to_datetime(
-        df.loc[:, 1].astype(str)
-        + " "
-        + df.loc[:, 2].astype(str)
-    )
-
-
-    values = (
-        df.loc[:, 8:]
-        .apply(
-            pd.to_numeric,
-            errors="coerce",
-        )
-        .to_numpy()
-    )
-
-
-    da = xr.DataArray(
-        values,
-        dims=[
-            "time",
-            "node",
-        ],
-        coords={
-            "time": time.values,
-            "node": np.arange(
-                values.shape[1]
-            ),
-        },
-    )
-
-    return da
+    # Standardize the ordering used by all detection routines:
+    # largest z (top thermistor) -> smallest z (bottom thermistor).
+    return da.sortby("z", ascending=False)
 
 
 
@@ -124,76 +72,48 @@ def load_simba_data(
     root_dir,
     cfg,
 ):
+    """
+    Load SIMBA temperature and heating-cycle data from NetCDF files.
 
-    root_dir = Path(root_dir)
+    Expected files:
+        <root_dir>/<year>/SIMBA/SIMBA_temp.nc
+        <root_dir>/<year>/SIMBA/SIMBA_del.nc
 
-    data_dir = (
-        root_dir
+    Both files are expected to contain a physical vertical coordinate ``z``
+    in metres. No node-to-z conversion or deployment offset is required.
+
+    Returns
+    -------
+    dict
+        {
+            "temp": temperature DataArray,
+            "del0": DELDATA 0 s DataArray,
+            "del1": DELDATA 30 s DataArray,
+            "del4": DELDATA 120 s DataArray,
+        }
+    """
+
+    simba_dir = (
+        Path(root_dir)
         / "data"
         / str(cfg.year)
         / "SIMBA"
-        
     )
 
+    temp = xr.open_dataset(
+        simba_dir / "SIMBA_temp.nc"
+    )["temp"]
 
-    da_temp = simba_to_da(
-        data_dir
-        / "TEMPDATA*"
+    del_ds = xr.open_dataset(
+        simba_dir / "SIMBA_del.nc"
     )
-
-    da_del0 = simba_to_da(
-        data_dir
-        / "DELDATA0*"
-    )
-
-    da_del1 = simba_to_da(
-        data_dir
-        / "DELDATA1*"
-    )
-
-    da_del4 = simba_to_da(
-        data_dir
-        / "DELDATA4*"
-    )
-
-
-    # Remove bad bottom nodes
-    da_temp = da_temp.isel(
-        node=slice(
-            0,
-            cfg.max_node,
-        )
-    )
-
-    da_del0 = da_del0.isel(
-        node=slice(
-            0,
-            cfg.max_node,
-        )
-    )
-
-    da_del1 = da_del1.isel(
-        node=slice(
-            0,
-            cfg.max_node,
-        )
-    )
-
-    da_del4 = da_del4.isel(
-        node=slice(
-            0,
-            cfg.max_node,
-        )
-    )
-
 
     return {
-        "temp": da_temp,
-        "del0": da_del0,
-        "del1": da_del1,
-        "del4": da_del4,
+        "temp": _prepare_simba_vertical_coordinate(temp),
+        "del0": _prepare_simba_vertical_coordinate(del_ds["del0"]),
+        "del1": _prepare_simba_vertical_coordinate(del_ds["del1"]),
+        "del4": _prepare_simba_vertical_coordinate(del_ds["del4"]),
     }
-
 
 
 # ============================================================
@@ -205,76 +125,62 @@ def correct_temperature(
     da_temp,
     cfg,
 ):
+    """
+    Correct persistent sensor-to-sensor temperature offsets.
 
-    # Mean profile during a relatively stable period
-    T_meas = (
-        da_temp
-        .sel(
-            time=slice(
-                cfg.calibration_start,
-                cfg.calibration_end,
-            )
+    The calibration spline is fit directly in physical z space. The input and
+    output both retain ``z`` in metres; no node-to-z conversion is performed.
+    """
+
+    calibration = da_temp.sel(
+        time=slice(
+            cfg.calibration_start,
+            cfg.calibration_end,
         )
-        .mean("time")
     )
 
+    if calibration.sizes.get("time", 0) == 0:
+        raise ValueError(
+            "No SIMBA temperature data found in calibration period "
+            f"{cfg.calibration_start} to {cfg.calibration_end}. "
+            f"Available data span {da_temp.time.min().values} to "
+            f"{da_temp.time.max().values}."
+        )
 
-    x = T_meas.node.values
-    y = T_meas.values
+    # Mean profile during a relatively stable period.
+    T_meas = calibration.mean("time")
 
+    valid = np.isfinite(T_meas.values)
+    n_valid = int(valid.sum())
 
-    valid = np.isfinite(y)
+    if n_valid < 4:
+        raise ValueError(
+            "Not enough valid thermistors to fit the cubic temperature "
+            f"correction spline: {n_valid} valid z levels."
+        )
 
+    # UnivariateSpline requires increasing x. SIMBA z is stored top-down,
+    # so sort the valid calibration profile by z before fitting.
+    x = T_meas.z.values[valid]
+    y = T_meas.values[valid]
+    order = np.argsort(x)
 
     cs = UnivariateSpline(
-        x[valid],
-        y[valid],
+        x[order],
+        y[order],
         s=cfg.spline_s,
     )
 
-
     T_spl = xr.DataArray(
-        cs(x),
-        dims=["node"],
-        coords={
-            "node": T_meas.node,
-        },
+        cs(T_meas.z.values),
+        dims=["z"],
+        coords={"z": T_meas.z},
     )
 
+    # Sensor-specific calibration offset.
+    T_err = T_meas - T_spl
 
-    # Sensor-specific calibration offset
-    T_err = (
-        T_meas
-        - T_spl
-    )
-
-
-    da_temp_corrected = (
-        da_temp
-        - T_err
-    )
-
-
-    # Convert node coordinate to z
-    z = (
-        -da_temp_corrected.node
-        * cfg.node_spacing_cm
-        + cfg.offset_cm
-    ) / 100
-
-
-    da_temp_z = (
-        da_temp_corrected
-        .assign_coords(
-            node=z
-        )
-        .rename({
-            "node": "z"
-        })
-    )
-
-
-    return da_temp_z
+    return da_temp - T_err
 
 
 
@@ -282,16 +188,51 @@ def correct_temperature(
 # HELPER
 # ============================================================
 
-def node_to_z(
-    node,
-    cfg,
+def _select_z_range(
+    da,
+    min_z_m,
+    max_z_m,
 ):
+    """
+    Select a vertical interval using the physical z coordinate.
 
-    return (
-        -node
-        * cfg.node_spacing_cm
-        + cfg.offset_cm
-    ) / 100
+    Parameters
+    ----------
+    da : xr.DataArray
+        DataArray with vertical dimension 'z'.
+    min_z_m : float
+        Minimum z coordinate in metres.
+    max_z_m : float
+        Maximum z coordinate in metres.
+    """
+
+    if "z" not in da.dims:
+        raise ValueError(
+            "Expected a physical vertical dimension named 'z'."
+        )
+
+    if max_z_m <= min_z_m:
+        raise ValueError(
+            "max_z_m must be greater than min_z_m."
+        )
+
+    return da.where(
+        (da.z >= min_z_m)
+        & (da.z < max_z_m),
+        drop=True,
+    )
+
+
+def _median_vertical_spacing_m(da):
+    """Return the median absolute thermistor spacing in metres."""
+
+    dz = np.diff(da.z.values.astype(float))
+    dz = np.abs(dz[np.isfinite(dz)])
+
+    if dz.size == 0:
+        raise ValueError("Could not determine SIMBA vertical spacing from z.")
+
+    return float(np.median(dz))
 
 
 
@@ -308,7 +249,20 @@ def apply_values(
     }
     """
 
-    interface = interface.copy()
+    # Some detected interfaces originate from a coordinate variable
+    # (e.g. selecting values from the z coordinate).  Coordinate-backed
+    # IndexVariables are immutable in xarray, so explicitly create a
+    # writable DataArray before applying manual corrections.
+    interface = xr.DataArray(
+        interface.values.copy(),
+        coords={
+            dim: interface[dim].values
+            for dim in interface.dims
+        },
+        dims=interface.dims,
+        name=interface.name,
+        attrs=interface.attrs,
+    )
 
     for date, value in corrections.items():
 
@@ -329,7 +283,18 @@ def apply_ranges(
     ]
     """
 
-    interface = interface.copy()
+    # Ensure the interface is writable even if it originated from
+    # an xarray coordinate / IndexVariable.
+    interface = xr.DataArray(
+        interface.values.copy(),
+        coords={
+            dim: interface[dim].values
+            for dim in interface.dims
+        },
+        dims=interface.dims,
+        name=interface.name,
+        attrs=interface.attrs,
+    )
 
     for start, end, value in corrections:
 
@@ -352,34 +317,38 @@ def detect_snow_ice(
     cfg,
 ):
 
-    T_30_120 = (
-        da_del1
-        / da_del4
+    T_30_120 = da_del1 / da_del4
+
+    T_30_120 = _select_z_range(
+        T_30_120,
+        cfg.snow_ice_search_min_z_m,
+        cfg.snow_ice_search_max_z_m,
     )
 
+    gradient = T_30_120.differentiate("z")
 
-    T_30_120 = T_30_120.isel(
-        node=slice(
-            cfg.snow_ice_node_min,
-            cfg.snow_ice_node_max,
-        )
+    # z decreases downward, so the old positive
+    # node-space gradient becomes a negative z-gradient
+    interface_index = gradient.argmin("z")
+
+    # Preserve original +1-node (= 2 cm downward) behavior
+    interface_index = np.minimum(
+        interface_index + 1,
+        T_30_120.sizes["z"] - 1,
     )
 
-
-    gradient = (
-        T_30_120
-        .differentiate("node")
+    snow_ice_z = xr.DataArray(
+        T_30_120.z.values[
+            interface_index.values
+        ],
+        coords={
+            "time": T_30_120.time.values
+        },
+        dims=["time"],
+        name="snow_ice",
     )
 
-
-    snow_ice_node = (
-        gradient
-        .argmax("node")
-        + 1
-    )
-
-
-    return snow_ice_node
+    return snow_ice_z
 
 
 
@@ -431,39 +400,72 @@ def smooth_snow_ice(
 # ICE-WATER
 # ============================================================
 
-def detect_ice_water(da_del0, da_del1, cfg):
+def detect_ice_water(
+    da_del0,
+    da_del1,
+    cfg,
+):
+    """
+    Detect the ice-water interface directly in physical z space.
 
+    The original criterion was dR/dnode > 0.1.
+
+    Since:
+        1 node = 0.02 m
+        z decreases downward,
+
+    the equivalent criterion is:
+
+        dR/dz < -5 m^-1
+
+    The deepest qualifying gradient (smallest z) is returned
+    as the ice-water interface elevation.
+    """
+
+    # Heating ratio
     T_0_30 = da_del0 / da_del1
 
-    T_0_30_icewater = T_0_30.isel(
-        node=slice(
-            cfg.ice_water_node_min,
-            cfg.ice_water_node_max,
-        )
+    # Restrict search to the specified physical z range
+    T_0_30_icewater = _select_z_range(
+        T_0_30,
+        cfg.ice_water_search_min_z_m,
+        cfg.ice_water_search_max_z_m,
     )
 
-    T_0_30_grad = T_0_30_icewater.differentiate("node")
-
-    def last_nonzero(arr, axis, invalid_val=np.nan):
-        mask = arr != 0
-        val = (
-            arr.shape[axis]
-            - np.flip(mask, axis=axis).argmax(axis=axis)
-            - 1
-        )
-        return xr.where(mask.any(axis=axis), val, invalid_val)
-
-    max_grads = T_0_30_grad.where(
-        T_0_30_grad > cfg.ice_water_gradient_threshold,
-        other=0,
+    # Vertical gradient in physical coordinates
+    T_0_30_grad = (
+        T_0_30_icewater
+        .differentiate("z")
     )
 
-    ice_water = (
-        last_nonzero(max_grads, axis=1)
-        + cfg.ice_water_node_min
+    # Because dz/dnode = -0.02 m,
+    # this becomes:
+    #     dR/dz < -5 m^-1
+    steep = (
+        T_0_30_grad
+        < -cfg.ice_water_gradient_threshold_per_m
     )
 
-    return ice_water
+    # Since z decreases downward, this corresponds
+    # to the smallest qualifying z value.
+    ice_water_coord = (
+        T_0_30_grad.z
+        .where(steep)
+        .min("z", skipna=True)
+    )
+
+    # Make an ordinary writable DataArray
+    ice_water_z = xr.DataArray(
+        ice_water_coord.values.copy(),
+        coords={
+            "time": T_0_30_grad.time.values
+        },
+        dims=["time"],
+        name="ice_water",
+    )
+
+    return ice_water_z
+
 
 
 def smooth_ice_water(
@@ -626,54 +628,82 @@ def detect_snow_air_from_heating(
     da_del1,
     da_del4,
     cfg,
-    threshold=0.05,
-    window=5,
-    node_min=0,
-    node_max=100,
 ):
     """
-    Detect the snow-air interface from the first sustained region
-    of strong HT30/HT120 gradients, searching top-down.
+    Detect the snow-air interface from HT30/HT120
+    directly in physical z space.
 
-    Returns the detected node number.
+    The first qualifying location from the top downward
+    is returned directly as z in metres.
     """
 
-    # Calculate heating ratio
     T_30_120 = da_del1 / da_del4
 
-    # Restrict to the upper part of the chain
-    T_30_120 = T_30_120.isel(
-        node=slice(node_min, node_max)
+    # Restrict search to absolute physical z range
+    T_30_120 = _select_z_range(
+        T_30_120,
+        cfg.snow_air_heating_search_min_z_m,
+        cfg.snow_air_heating_search_max_z_m,
     )
 
-    # Calculate gradient along the chain
-    gradient = T_30_120.diff("node")
+    # Forward difference expressed per metre
+    dz = T_30_120.z.diff("z")
 
-    # Rolling mean of absolute gradient
+    gradient = (
+        T_30_120.diff("z")
+        / dz
+    )
+
+    # Convert smoothing depth in metres to number of sensors
+    spacing_m = _median_vertical_spacing_m(
+        T_30_120
+    )
+
+    window_points = max(
+        1,
+        int(
+            round(
+                cfg.snow_air_heating_smooth_depth_m
+                / spacing_m
+            )
+        ),
+    )
+
     gradient_smooth = (
         abs(gradient)
         .rolling(
-            node=window,
+            z=window_points,
             center=True,
-            min_periods=window,
+            min_periods=window_points,
         )
         .mean()
     )
 
-    # Identify regions exceeding the threshold
-    steep = gradient_smooth > threshold
-
-    # Find the FIRST qualifying node from the top downward
-    snow_air_node = (
-        gradient_smooth.node
-        .where(steep)
-        .min("node", skipna=True)
+    steep = (
+        gradient_smooth
+        > cfg.snow_air_heating_gradient_threshold_per_m
     )
 
-    return snow_air_node
+    # z decreases downward.
+    # Therefore the FIRST qualifying point from the top
+    # is the largest qualifying z value.
+    snow_air_coord = (
+        gradient_smooth.z
+        .where(steep)
+        .max("z", skipna=True)
+    )
 
-from pathlib import Path
-import xarray as xr
+    # Return an ordinary writable DataArray
+    snow_air_z = xr.DataArray(
+        snow_air_coord.values.copy(),
+        coords={
+            "time": gradient_smooth.time.values
+        },
+        dims=["time"],
+        name="snow_air",
+    )
+
+    return snow_air_z
 
 
 def build_interface_dataset(

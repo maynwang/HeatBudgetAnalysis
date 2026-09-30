@@ -10,7 +10,6 @@ from simba_interfaces import (
     detect_snow_ice,
     detect_ice_water,
     detect_snow_air,
-    node_to_z,
     apply_values,
     apply_ranges,
     smooth_snow_ice,
@@ -29,19 +28,16 @@ ROOT = Path(".")
 # ============================================================
 
 cfg = SIMBAConfig(
-
     year=2024,
 
+    # Keep the longer processing window used by the original 2024 workflow.
+    # The final H_bottom product is subset to Jan 26-Apr 15 below.
     start="2024-01-23",
     end="2024-04-15",
-
-    # IMPORTANT: 2024 offset
-    offset_cm=176,
 
     calibration_start="2024-03-25",
     calibration_end="2024-04-10",
 )
-
 
 
 # ============================================================
@@ -63,48 +59,42 @@ weekly_ice = xr.open_dataset(
 # TEMPERATURE
 # ============================================================
 
+# Temperature data already use physical z (m) from SIMBA_temp.nc.
 da_temp = correct_temperature(
     simba["temp"],
     cfg,
 )
 
 
-
 # ============================================================
 # SNOW-ICE
 # ============================================================
 
-snow_ice_raw = detect_snow_ice(
+# Returns the detected snow-ice interface directly in metres.
+snow_ice_m = detect_snow_ice(
     simba["del1"],
     simba["del4"],
     cfg,
 )
 
 
-snow_ice = snow_ice_raw.copy()
+# Preserve the original 2024 positional corrections.
+snow_ice_m = snow_ice_m.copy()
+
+snow_ice_m[:30] = snow_ice_m[0]
+
+snow_ice_m[-9] = snow_ice_m[-10]
 
 
-# Existing 2024 manual node corrections
-snow_ice[:30] = snow_ice[0]
-
-snow_ice[-9] = snow_ice[-10]
-
-
-# Node -> metres
-snow_ice_m = node_to_z(
-    snow_ice,
-    cfg,
-)
-
-
+# Preserve the original treatment where negative snow-ice elevations
+# were set to zero before the late-season manual corrections.
 snow_ice_m = snow_ice_m.where(
     snow_ice_m > 0,
     0,
 )
 
 
-# Manual 2024 corrections
-
+# Manual 2024 corrections.
 snow_ice_m = apply_ranges(
     snow_ice_m,
     [
@@ -139,7 +129,7 @@ snow_ice_m = apply_values(
 )
 
 
-# Preserve your original end treatment
+# Preserve the original late-season edge treatment.
 fill_vals = snow_ice_6h.sel(
     time=slice(
         "2024-04-10",
@@ -161,7 +151,7 @@ snow_ice_smooth.data[
 ] = fill_vals.values
 
 
-# Preserve original early edge fill
+# Preserve the original early edge fill.
 first_notnan = np.where(
     ~np.isnan(
         snow_ice_smooth
@@ -179,51 +169,47 @@ snow_ice_smooth[:100] = (
 )
 
 
-
 # ============================================================
 # ICE-WATER
 # ============================================================
 
-ice_water_raw = detect_ice_water(
+# Returns the detected ice-water interface directly in metres.
+ice_water_m = detect_ice_water(
     simba["del0"],
     simba["del1"],
     cfg,
 )
 
 
-ice_water = ice_water_raw.copy()
-
-
-# Manual node corrections
-
-ice_water = apply_ranges(
-    ice_water,
+# Preserve the original manual node corrections, now expressed directly
+# in metres using the historical 2024 conversion:
+#     z = (176 cm - node * 2 cm) / 100
+# node 116 -> -0.56 m
+# node 117 -> -0.58 m
+# node 118 -> -0.60 m
+ice_water_m = apply_ranges(
+    ice_water_m,
     [
         (
             "2024-02-27",
             "2024-02-28",
-            117,
+            -0.58,
         ),
     ],
 )
 
 
-ice_water = apply_values(
-    ice_water,
+ice_water_m = apply_values(
+    ice_water_m,
     {
-        "2024-02-22": 116,
-        "2024-03-11": 118,
+        "2024-02-22": -0.56,
+        "2024-03-11": -0.60,
     },
 )
 
 
-ice_water_m = node_to_z(
-    ice_water,
-    cfg,
-)
-
 # --------------------------------------------------
-# Final clamped ice-water interface
+# Final clamped ice-water interface used in heat budget
 # --------------------------------------------------
 
 H_bottom = smooth_ice_water_clamped(
@@ -232,9 +218,12 @@ H_bottom = smooth_ice_water_clamped(
     clamp_value=-0.62,
     taper_len=20,
     spline_s=0.004,
-    apply_2024_patch=True
+    apply_2024_patch=True,
 )
 
+
+# Also reproduce the original twice-smoothed interface used for
+# temperature masking and H_ice.
 ice_water_smooth = smooth_ice_water(
     ice_water_m,
     da_temp.time,
@@ -242,8 +231,7 @@ ice_water_smooth = smooth_ice_water(
 )
 
 
-# Original edge corrections
-
+# Original edge corrections.
 ice_water_smooth[100:] = (
     ice_water_smooth[100:]
     .fillna(-0.62)
@@ -264,15 +252,12 @@ ice_water_smooth[14:20] = (
 )
 
 
-
 # ============================================================
 # SNOW-AIR
 # ============================================================
 
 snow_air_raw = detect_snow_air(
-
     da_temp,
-
     cfg,
 
     drop_times=[
@@ -294,16 +279,14 @@ snow_air_raw = detect_snow_air(
 snow_air = snow_air_raw.copy()
 
 
-# Direct manual fixes
-
+# Direct manual fixes.
 snow_air = apply_values(
     snow_air,
     {
         "2024-02-14": 0.20,
 
-        # Original script had 0.85 and then immediately
-        # overwrote it with 0.90, so 0.90 is the
-        # effective value.
+        # Original script had 0.85 and then immediately overwrote
+        # it with 0.90, so 0.90 is the effective value.
         "2024-02-20": 0.90,
 
         "2024-02-21": 0.90,
@@ -328,13 +311,15 @@ snow_air = apply_values(
     },
 )
 
-# February 4: use the February 3 interface
+
+# February 4: use the February 3 interface.
 snow_air.loc[dict(time="2024-02-04")] = (
     snow_air.sel(time="2024-02-03").item()
 )
 
-# March 13–15: use the weekly observation nearest March 12
-march_snow = weekly_ice["hs"].sel(
+
+# March 13-15: use the weekly observation nearest March 12.
+march_snow = weekly_ice["hs_snowStake_mean"].sel(
     time="2024-03-12",
     method="nearest",
 ).item()
@@ -343,14 +328,15 @@ snow_air.loc[
     dict(time=slice("2024-03-13", "2024-03-15"))
 ] = march_snow
 
-# April 8–15: no dry snow remains
-# Snow-air interface equals snow-ice interface
 
+# April 8-15: no dry snow remains, so the snow-air interface
+# equals the snow-ice interface.
 snow_air.loc[
     dict(time=slice("2024-04-08", "2024-04-15"))
 ] = snow_ice_m.sel(
     time=slice("2024-04-08", "2024-04-15")
 ).values
+
 
 # ============================================================
 # FINAL PRODUCTS
@@ -405,9 +391,7 @@ ice_water_smooth = (
 )
 
 
-
-# Ice temperature
-
+# Ice temperature.
 temp_ice = da_temp.where(
     (
         da_temp.z
@@ -422,9 +406,7 @@ temp_ice = da_temp.where(
 )
 
 
-
-# Snow thickness
-
+# Snow thickness.
 H_snow = (
     snow_air
     - snow_ice_daily
@@ -437,54 +419,48 @@ H_snow = H_snow.where(
 )
 
 
-
-# Ice thickness
-
+# Ice thickness.
+# Preserve the historical sign convention used by the original workflow.
 H_ice = (
     ice_water_smooth
     - snow_ice_smooth
 )
 
+
 # ============================================================
 # SAVE FINAL SIMBA PRODUCTS
 # ============================================================
 
+# The heat-budget H_bottom product starts Jan 26 even though earlier
+# observations are retained above for the smoothing procedure.
 H_bottom = H_bottom.sel(
     time=slice("2024-01-26", "2024-04-15")
 )
 
+
 interfaces = build_interface_dataset(
-
     temperature=da_temp,
-
     temp_ice=temp_ice,
-
     H_ice=H_ice,
-
     H_bottom=H_bottom,
-
     snow_air=snow_air,
-
     snow_ice=snow_ice_daily,
-
     H_snow=H_snow,
-
     snow_ice_smoothed=snow_ice_smooth,
-
     year=cfg.year,
 )
 
 
-# output_file = (
-#     Path("data")
-#     / str(cfg.year)
-#     / "SIMBA"
-#     / "processed"
-#     / f"SIMBA_interfaces_{cfg.year}.nc"
-# )
+output_file = (
+    Path("data")
+    / str(cfg.year)
+    / "SIMBA"
+    / "processed"
+    / f"SIMBA_interfaces_{cfg.year}.nc"
+)
 
 
-# save_interface_dataset(
-#     interfaces,
-#     output_file,
-# )
+save_interface_dataset(
+    interfaces,
+    output_file,
+)
