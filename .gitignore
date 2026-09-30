@@ -10,8 +10,12 @@ venv/
 
 # Ignore all data and generated outputs
 /data/
-/outputs/
 /figures/
+
+# Ignore other years for the pub version
+run_simba_interface_2025.py
+run_simba_interface_2026.py
+functions/snfCTD.py
 
 # Temporary files
 *.tmp
