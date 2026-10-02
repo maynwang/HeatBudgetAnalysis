@@ -30,7 +30,6 @@ ROOT = Path(".")
 cfg = SIMBAConfig(
     year=2024,
 
-    # Keep the longer processing window used by the original 2024 workflow.
     # The final H_bottom product is subset to Jan 26-Apr 15 below.
     start="2024-01-23",
     end="2024-04-15",
@@ -86,8 +85,7 @@ snow_ice_m[:30] = snow_ice_m[0]
 snow_ice_m[-9] = snow_ice_m[-10]
 
 
-# Preserve the original treatment where negative snow-ice elevations
-# were set to zero before the late-season manual corrections.
+# negative snow-ice elevations set to zero before the late-season manual corrections.
 snow_ice_m = snow_ice_m.where(
     snow_ice_m > 0,
     0,
@@ -129,7 +127,7 @@ snow_ice_m = apply_values(
 )
 
 
-# Preserve the original late-season edge treatment.
+# late-season edge treatment
 fill_vals = snow_ice_6h.sel(
     time=slice(
         "2024-04-10",
@@ -151,7 +149,7 @@ snow_ice_smooth.data[
 ] = fill_vals.values
 
 
-# Preserve the original early edge fill.
+# early season edge fill
 first_notnan = np.where(
     ~np.isnan(
         snow_ice_smooth
@@ -181,7 +179,7 @@ ice_water_m = detect_ice_water(
 )
 
 
-# Preserve the original manual node corrections, now expressed directly
+# Manual node corrections directly expressed
 # in metres using the historical 2024 conversion:
 #     z = (176 cm - node * 2 cm) / 100
 # node 116 -> -0.56 m
@@ -222,7 +220,7 @@ H_bottom = smooth_ice_water_clamped(
 )
 
 
-# Also reproduce the original twice-smoothed interface used for
+# twice-smoothed interface used for
 # temperature masking and H_ice.
 ice_water_smooth = smooth_ice_water(
     ice_water_m,
@@ -231,7 +229,7 @@ ice_water_smooth = smooth_ice_water(
 )
 
 
-# Original edge corrections.
+# more edge corrections
 ice_water_smooth[100:] = (
     ice_water_smooth[100:]
     .fillna(-0.62)
@@ -284,11 +282,7 @@ snow_air = apply_values(
     snow_air,
     {
         "2024-02-14": 0.20,
-
-        # Original script had 0.85 and then immediately overwrote
-        # it with 0.90, so 0.90 is the effective value.
         "2024-02-20": 0.90,
-
         "2024-02-21": 0.90,
         "2024-02-22": 0.80,
         "2024-02-26": 0.70,
@@ -420,7 +414,6 @@ H_snow = H_snow.where(
 
 
 # Ice thickness.
-# Preserve the historical sign convention used by the original workflow.
 H_ice = (
     ice_water_smooth
     - snow_ice_smooth
@@ -431,8 +424,6 @@ H_ice = (
 # SAVE FINAL SIMBA PRODUCTS
 # ============================================================
 
-# The heat-budget H_bottom product starts Jan 26 even though earlier
-# observations are retained above for the smoothing procedure.
 H_bottom = H_bottom.sel(
     time=slice("2024-01-26", "2024-04-15")
 )
