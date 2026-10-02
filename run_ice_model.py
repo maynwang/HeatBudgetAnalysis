@@ -277,8 +277,6 @@ def resolve_model_config(cfg: ModelConfig) -> ModelConfig:
 
     Explicit values in ``cfg`` or ``YEAR_OVERRIDES`` take priority. Missing
     values are inferred from the processed SIMBA and heat-budget products.
-    This keeps the model code year-agnostic while preserving the historical
-    2024 choices exactly.
     """
 
     cfg = apply_year_overrides(cfg)
