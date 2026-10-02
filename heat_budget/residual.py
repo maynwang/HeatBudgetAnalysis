@@ -15,9 +15,6 @@ def calculate_residual(
 ) -> xr.Dataset:
     """
     Calculate melt terms and residual heat flux.
-
-    This preserves the calculation used in the original 2024
-    residual analysis while returning daily output.
     """
 
     # ========================================================
@@ -87,8 +84,6 @@ def calculate_residual(
         / 86400.0
     )
 
-    # The original code explicitly shifted these values onto
-    # snow_air[0:-1]. Reproduce that behavior.
     F_snow_melt = xr.zeros_like(
         daily["snow_air"]
     )
@@ -102,7 +97,6 @@ def calculate_residual(
     # 2. ICE / SNOW-ICE MELT
     # ========================================================
 
-    # IMPORTANT:
     # Preserve native (6-hourly) snow-ice resolution here.
     start = daily.time.values[0]
     end = daily.time.values[-1] + np.timedelta64(1, "D")
@@ -132,8 +126,6 @@ def calculate_residual(
     )
 
     # THEN average the flux to daily.
-    # This is intentionally different from differentiating
-    # daily-mean snow-ice thickness.
     F_ice_melt = (
         F_ice_melt
         .resample(time="1D")
@@ -177,8 +169,7 @@ def calculate_residual(
     # 5. ROLLING RESIDUAL
     # ========================================================
 
-    # Preserve the exact structure of the original calculation
-    # rather than rolling the already-calculated residual.
+    # Smooth out the residual
     window = p.residual_rolling_days
 
     residual_roll = (
