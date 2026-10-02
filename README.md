@@ -1,6 +1,6 @@
 # Kaipokok Bay Sea Ice Heat Budget and Model Code
 
-This repository contains the analysis code used to process observations, calculate the sea-ice heat budget, run the 1-D thermodynamic sea-ice model, and generate figures for the Kaipokok Bay landfast sea-ice study near Postville, Nunatsiavut.
+This repository contains the analysis code used to process observations, calculate the sea-ice heat budget, run the 1-D thermodynamic sea-ice model, and generate figures for paper "Thermodynamics of Sub-Arctic Landfast Ice: A Heat Budget from Kaipokok Bay, Nunatsiavut (Labrador)"
 
 The main workflow is:
 
