@@ -1,9 +1,4 @@
-"""Generate figures for the 2024 Kaipokok Bay heat-budget paper.
-
-This script replaces the original notebook-style plotting workflow with explicit
-file loading and one function per figure. It is designed for a publication
-repository: running this file does not require variables to have been created in
-an interactive namespace first.
+"""Generate figures for the 2024 Kaipokok Bay heat budget paper.
 
 The script uses the current processed SIMBA product produced by
 ``run_simba_interface_2024.py``:
@@ -14,9 +9,7 @@ That file stores native-resolution variables on ``time_6h`` and daily variables
 on ``time_daily``. They are normalized to a local ``time`` dimension when loaded.
 
 Heat-budget plotting expects a NetCDF containing the final quantities used in
-Figures 6 and 7. Canonical variable names are listed in ``HEAT_BUDGET_ALIASES``.
-Legacy names from the original analysis are also accepted, which makes it easier
-to transition the plotting workflow while preserving the published calculation.
+Figures 6 and 7. 
 
 Figures represented in the original plotting script:
     Figure 2       SIMBA temperature and interfaces
