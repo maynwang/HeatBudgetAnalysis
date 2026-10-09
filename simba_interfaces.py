@@ -48,6 +48,11 @@ class SIMBAConfig:
     snow_air_heating_gradient_threshold_per_m: float = 2.5
     snow_air_heating_smooth_depth_m: float = 0.10
 
+    # Snow-air detection from raw temperature
+    snow_air_search_min_z_m: float = 0.0
+    snow_air_search_max_z_m: float = 1.0
+    snow_air_threshold: float = 0.7
+
 
 # ============================================================
 # LOAD SIMBA FILES
@@ -570,14 +575,14 @@ def detect_snow_air(
 
     T_snowair = da_temp_night.sel(
         z=slice(
-            1,
-            0,
+            cfg.snow_air_search_max_z_m,
+            cfg.snow_air_search_min_z_m,
         )
     )
 
 
     Tair_mean = (
-        T_snowair
+        da_temp_night
         .sel(
             z=slice(
                 1.4,
@@ -592,7 +597,6 @@ def detect_snow_air(
         T_snowair
         - Tair_mean
     )
-
 
     detected = difference.where(
         abs(difference)

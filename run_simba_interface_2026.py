@@ -5,6 +5,7 @@ import xarray as xr
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+plt.ion()
 
 from simba_interfaces import (
     SIMBAConfig,
@@ -19,6 +20,7 @@ from simba_interfaces import (
     save_interface_dataset,
     correct_interface_outliers,
     detect_snow_air_from_heating,
+    detect_snow_air,
 )
 
 
@@ -29,9 +31,10 @@ ROOT = Path(".")
 # CONFIG
 # ============================================================
 
+
 cfg = SIMBAConfig(
     year=2026,
-    start="2026-02-06",
+    start="2026-02-03",
     end="2026-04-21",
 
     calibration_start="2026-03-25",
@@ -44,6 +47,15 @@ cfg = SIMBAConfig(
     # Ice-water detection
     ice_water_search_min_z_m= -1.0,
     ice_water_search_max_z_m= 0.0,
+
+    snow_air_heating_search_min_z_m=0.1,
+    snow_air_heating_search_max_z_m=0.5,
+    snow_air_heating_gradient_threshold_per_m=2.0,
+    snow_air_heating_smooth_depth_m=0.10,
+
+    snow_air_threshold = 5,
+    snow_air_search_max_z_m = 0.4,
+    snow_air_search_min_z_m = 0.2
 
 )
 
@@ -65,10 +77,15 @@ weekly_ice = xr.open_dataset(
 # TEMPERATURE
 # ============================================================
 
-da_temp = correct_temperature(
-    simba["temp"],
-    cfg,
-)
+# Temp correction introduces 2 strange lines in the temp time series. For not comment it out
+# da_temp = correct_temperature(
+#     simba["temp"],
+#     cfg,
+# )
+
+# The minus 0 is a hacky way to drop the temp label of the DataArray
+da_temp = simba["temp"].copy() - 0
+
 
 # Plot temperature
 # Convert timestamps to numeric Matplotlib dates
@@ -93,7 +110,7 @@ fig.autofmt_xdate()
 ax.set_ylabel("z (m)")
 fig.colorbar(im, ax=ax, label="Temperature (°C)")
 
-im.set_clim(-10, 2)
+im.set_clim(-20, 2)
 
 
 # ============================================================
@@ -108,7 +125,7 @@ snow_ice_m = detect_snow_ice(
 
 
 # Plot the heating ratio for manual corrections
-T_30_120 = simba["del1"] / simba["del4"]
+T_30_120 = simba["del0"] / simba["del4"]
 
 fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -127,10 +144,17 @@ ax.set_xlabel("Time")
 
 # Manual 2026 corrections
 
+# Replace snow-air interface before March 12 with 0
+snow_ice_m = snow_ice_m.where(
+    snow_ice_m.time >= np.datetime64("2026-03-10"),
+    0,
+)
+
+
 # Correct isolated interface spikes
 snow_ice_m = correct_interface_outliers(
     snow_ice_m,
-    threshold=0.05,
+    threshold=0.04,
 )
 
 
@@ -140,7 +164,20 @@ snow_ice_m = apply_values(
         "2026-04-02": snow_ice_m.sel(time="2026-04-01").values,
         "2026-04-03": snow_ice_m.sel(time="2026-04-01").values,
         "2026-02-24": 0,
+        "2026-04-19": snow_ice_m.sel(time="2026-04-18").values,
+        "2026-04-21": 0.24,
     },
+)
+
+snow_ice_m = apply_ranges(
+    snow_ice_m,
+    [
+        (
+            "2026-03-29",
+            "2026-04-01",
+            snow_ice_m.sel(time="2026-03-28").values,
+        ),
+    ],
 )
 
 
@@ -161,6 +198,9 @@ snow_ice_smooth = (
     .bfill(dim="time")
 )
 
+snow_ice_smooth = snow_ice_smooth.interp(
+    time=da_temp.time
+)
 
 # ============================================================
 # ICE-WATER
@@ -225,95 +265,16 @@ ice_water_smooth = ice_water_smooth.ffill("time").bfill("time")
 # SNOW-AIR
 # ============================================================
 
-# detect_snow_air_from_heating now returns physical z directly in metres.
-# The 2025-specific search range/threshold are defined in cfg above.
-snow_air_m = detect_snow_air_from_heating(
-    simba["del1"],
-    simba["del4"],
+snow_air_m = detect_snow_air(
+    da_temp,
     cfg,
 )
 
 
 # Interpolate weekly measurements onto the SIMBA timestamps
-weekly_hs_interp = weekly_ice.hs.interp(time=snow_air_m.time)
+weekly_hs_interp = weekly_ice.hs_snowStake_mean.interp(time=snow_air_m.time)
 
-# Replace snow-air interface before March 10 with weekly observations
-snow_air_m = snow_air_m.where(
-    snow_air_m.time >= np.datetime64("2025-03-10"),
-    weekly_hs_interp,
-)
-
-
-# First round of smoothing / isolated-spike correction
-snow_air_m = correct_interface_outliers(
-    snow_air_m,
-    threshold=0.06,
-)
-
-
-# Direct manual fixes
-snow_air_m = apply_values(
-    snow_air_m,
-    {
-        "2025-02-21": 0.14,
-        "2025-02-22": 0.14,
-        "2025-03-06": weekly_hs_interp.sel(time="2025-03-06").values,
-        "2025-03-07": weekly_hs_interp.sel(time="2025-03-07").values,
-        "2025-03-08": weekly_hs_interp.sel(time="2025-03-08").values,
-        "2025-03-09": 0.2,
-        "2025-03-14": 0.22,
-        "2025-03-21": 0.24,
-        "2025-03-22": weekly_hs_interp.sel(time="2025-03-22").values,
-        "2025-03-23": weekly_hs_interp.sel(time="2025-03-23").values,
-        "2025-03-24": weekly_hs_interp.sel(time="2025-03-24").values,
-        "2025-03-25": 0.34,
-        "2025-03-31": 0.28,
-        "2025-04-02": 0.32,
-        "2025-04-03": 0.3,
-        "2025-04-04": 0.3,
-        "2025-04-05": 0.28,
-        "2025-04-06": 0.28,
-        "2025-04-07": 0.26,
-    },
-)
-
-
-snow_air_m = apply_ranges(
-    snow_air_m,
-    [
-        (
-            "2025-03-26",
-            "2025-03-30",
-            0.3,
-        ),
-    ],
-)
-
-snow_air_m = apply_ranges(
-    snow_air_m,
-    [
-        (
-            "2025-02-23",
-            "2025-02-27",
-            snow_air_m.sel(time="2025-03-01").values,
-        ),
-    ],
-)
-
-snow_air_m = apply_ranges(
-    snow_air_m,
-    [
-        (
-            "2025-04-09",
-            None,
-            0.34,
-        ),
-    ],
-)
-
-# Remove time-of-day stamp
-snow_air_m = snow_air_m.resample(time="1D").mean()
-
+# No manual fixing for 2026 data needed (for now)
 
 # ============================================================
 # FINAL PRODUCTS
@@ -424,7 +385,7 @@ output_file = (
     / f"SIMBA_interfaces_{cfg.year}.nc"
 )
 
-# save_interface_dataset(
-#     interfaces,
-#     output_file,
-# )
+save_interface_dataset(
+    interfaces,
+    output_file,
+)
