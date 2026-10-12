@@ -12,27 +12,27 @@ from heat_budget import (
 )
 
 
-season = SeasonConfig(
-    year=2024,
-    start="2024-01-26",
-    end="2024-04-15",
-    base_dir=Path("."),
-    rain_file=Path(
-        "data/2024/PostvilleWeather/postville_weather_2020-2024.csv"
-    ),
-    basal_plot_start="2024-02-02",
-)
-
 # season = SeasonConfig(
-#     year=2025,
-#     start="2025-02-19",
-#     end="2025-04-22",
+#     year=2024,
+#     start="2024-01-26",
+#     end="2024-04-15",
 #     base_dir=Path("."),
 #     rain_file=Path(
-#         "data/2024/PostvilleWeather/postville_weather_2019-2026.csv"
+#         "data/2024/PostvilleWeather/postville_weather_2020-2024.csv"
 #     ),
-#     basal_plot_start=None,
+#     basal_plot_start="2024-02-02",
 # )
+
+season = SeasonConfig(
+    year=2025,
+    start="2025-02-19",
+    end="2025-04-22",
+    base_dir=Path("."),
+    rain_file=Path(
+        "data/2024/PostvilleWeather/postville_weather_2019-2026.csv"
+    ),
+    basal_plot_start=None,
+)
 
 # season = SeasonConfig(
 #     year=2026,
