@@ -88,8 +88,8 @@ def calculate_radiation(ds: xr.Dataset, p: HeatBudgetParameters) -> xr.Dataset:
         * ds["SW_in"]
     )
 
-    F_lw = ds["F_lw_measured"].where(
-        ds["F_lw_measured"] > 0,
+    F_lw = ds["F_lw_net"].where(
+        ds["F_lw_net"] > 0,
         0,
     )
 
@@ -130,7 +130,7 @@ def calculate_turbulent_fluxes(
     F_lat = IMS.latent_heat_flux(
         ds["wind_10m"],
         ds["RH"],
-        ds["pressure"],
+        ds["atm_pressure"],
         ds["T_surface"],
         ds["T_air"],
     )
@@ -189,7 +189,7 @@ def calculate_basal_balance(
         * dH_bottom_dt
     )
 
-    # Matches the active equation in the original 2024 script.
+    # Ocean heat flux
     F_w = conduction["F_cond_ref"] + F_phase_change_basal
 
     return xr.Dataset(
@@ -210,7 +210,7 @@ def calculate_uncertainties(
     """Calculate uncertainty of the net surface heat flux."""
 
     sig_RH = ds["RH"] * p.relative_sig_RH
-    sig_pressure = ds["pressure"] * p.relative_sig_pressure
+    sig_pressure = ds["atm_pressure"] * p.relative_sig_pressure
 
     sig_netLW = np.abs(radiation["F_lw"]) * p.relative_sig_radiation
     sig_netSW = np.abs(radiation["F_sw"]) * p.relative_sig_radiation
@@ -218,7 +218,7 @@ def calculate_uncertainties(
     sig_Flat_relative = np.sqrt(
         (turbulent["sig_wind_10m"] / ds["wind_10m"]) ** 2
         + (sig_RH / ds["RH"]) ** 2
-        + (sig_pressure / ds["pressure"]) ** 2
+        + (sig_pressure / ds["atm_pressure"]) ** 2
         + (turbulent["sig_Tsurface"] / ds["T_surface"]) ** 2
         + (turbulent["sig_Ta"] / ds["T_air"]) ** 2
     )

@@ -82,7 +82,7 @@ def preprocess_daily(
 
     T_air = weather[cfg.air_temperature_var].resample(time="1D").mean("time")
     RH = weather[cfg.relative_humidity_var].resample(time="1D").mean("time")
-    pressure = weather[cfg.pressure_var].resample(time="1D").mean("time")
+    atm_pressure = weather[cfg.pressure_var].resample(time="1D").mean("time")
 
     # first average weather data to hourly resolution (for max winds in residual)
     weather_hourly = weather.resample(time="1h").mean("time")
@@ -99,7 +99,7 @@ def preprocess_daily(
     # Daily maximum of the hourly-mean 10 m wind
     wind_10m_max = wind_10m_hourly.resample(time="1D").max("time")
 
-    F_lw_measured = -weather[cfg.net_longwave_var].resample(time="1D").mean("time")
+    F_lw_net = -weather[cfg.net_longwave_var].resample(time="1D").mean("time")
 
     SW_in_native = weather[cfg.sw_in_var]
     SW_out_native = weather[cfg.sw_out_var]
@@ -131,16 +131,20 @@ def preprocess_daily(
     )
     T_surface = T_surface_native.resample(time="1D").mean("time")
 
+    # Surface albedo
+    albedo_calculated = SW_out / SW_in
+
     ds = xr.Dataset(
         {
             "T_air": T_air,
             "RH": RH,
-            "pressure": pressure,
+            "atm_pressure": atm_pressure,
             "wind_10m": wind_10m,
             "wind_10m_max": wind_10m_max,
-            "F_lw_measured": F_lw_measured,
+            "F_lw_net": F_lw_net,
             "SW_in": SW_in,
             "SW_out": SW_out,
+            "albedo_calculated": albedo_calculated,
             "T_surface": T_surface,
             "H_ice": _daily_mean(raw["H_ice"], cfg.start, cfg.end),
             "H_snow": _daily_mean(raw["H_snow"], cfg.start, cfg.end),
